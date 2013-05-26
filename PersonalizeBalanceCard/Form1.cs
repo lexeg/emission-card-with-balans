@@ -326,13 +326,13 @@ namespace PersonalizeBalanceCard
         private void button1_Click(object sender, EventArgs e)
         {
             Init();
-            PoolFunction((object)"start_sale");
-            return;
-            /*for (int i = 0; i < 5; i++)
+            //PoolFunction((object)"start_sale");
+            //return;
+            for (int i = 0; i < 5; i++)
             {
                 PoolFunction((object)"start_sale");
                 PoolFunction((object)"sale;75;204");
-            }*/
+            }
         }
 
     }
