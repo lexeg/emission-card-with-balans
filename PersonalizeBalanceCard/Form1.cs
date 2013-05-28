@@ -328,7 +328,7 @@ namespace PersonalizeBalanceCard
             Init();
             //PoolFunction((object)"start_sale");
             //return;
-            for (int i = 0; i < 5; i++)
+            for (int i = 0; i < 30; i++)
             {
                 PoolFunction((object)"start_sale");
                 PoolFunction((object)"sale;75;204");
