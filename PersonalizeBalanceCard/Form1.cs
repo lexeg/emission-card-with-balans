@@ -105,8 +105,9 @@ namespace PersonalizeBalanceCard
             textLoger.Text += String.Format("{0}; EventEntryType {1}\r\n", text, ev);
         }
 
-        public void SendAction(CardOperationType cardOperationType)
+        public DisppenserStatus SendAction(CardOperationType cardOperationType)
         {
+            DisppenserStatus result = DisppenserStatus.DispenserError;
             PipeClient client = new PipeClient();
             client.Logger = Logger;
             string message = client.SendPipeMessage(CardOperationType.reqStatus, reqStatus, PipeClient.CONNECT_TIMEOUT, true);
@@ -142,10 +143,12 @@ namespace PersonalizeBalanceCard
                 {
                     case DisppenserStatus.DispenserError:
                         Logger(str2 + "диспенсер не работает", EventEntryType.Error);
+                        result = DisppenserStatus.DispenserError;
                         break;
 
                     case DisppenserStatus.NoCard:
                         Logger(string.Format(format, num, Environment.NewLine, "НЕТ"), EventEntryType.Warning);
+                        result = DisppenserStatus.NoCard;
                         break;
 
                     case DisppenserStatus.FewCard:
@@ -153,15 +156,17 @@ namespace PersonalizeBalanceCard
                         if (!(mrkStatus.CardPrice == 0M))
                         {
                             Logger(string.Format(format, num, Environment.NewLine, "ЕСТЬ"),EventEntryType.Event);
+                            result = (DisppenserStatus)mrkStatus.DispenserStatus;
                             break;
                         }
                         Logger(str2 + "цена карты не определена.", EventEntryType.Warning);
                         break;
                 }
             }
+            return result;
         }
 
-        private void PoolFunction(object state)
+        private void PoolFunction(object state, ref DisppenserStatus statusOfDispenser)
         {
             object obj2;
             string _terminalId = "";
@@ -193,7 +198,7 @@ namespace PersonalizeBalanceCard
                 switch (strArray[0])
                 {
                     case "start_sale":
-                        this.SendAction(CardOperationType.reqSaleCard);
+                        statusOfDispenser = this.SendAction(CardOperationType.reqSaleCard);
                         return;
 
                     case "start_add":
@@ -328,11 +333,18 @@ namespace PersonalizeBalanceCard
             Init();
             //PoolFunction((object)"start_sale");
             //return;
-            for (int i = 0; i < 30; i++)
+            DisppenserStatus statusOfDispenser = DisppenserStatus.NoCard;
+            do
             {
-                PoolFunction((object)"start_sale");
-                PoolFunction((object)"sale;75;204");
-            }
+                PoolFunction((object)"start_sale", ref statusOfDispenser);
+                textLoger.Text += String.Format("\r\nПромежуточный статус: {0}\r\n", statusOfDispenser);
+                if (statusOfDispenser == DisppenserStatus.NoCard && statusOfDispenser == DisppenserStatus.DispenserError)
+                {
+                    break;
+                }
+                PoolFunction((object)"sale;75;204", ref statusOfDispenser);
+            } while (statusOfDispenser != DisppenserStatus.NoCard && statusOfDispenser != DisppenserStatus.DispenserError);
+            textLoger.Text += String.Format("\r\nПоследний полученный статус: {0}", statusOfDispenser);
         }
 
     }
