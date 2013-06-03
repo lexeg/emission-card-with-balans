@@ -44,6 +44,8 @@ namespace PersonalizeBalanceCard
     public partial class Form1 : Form
     {
         private bool _cancel;
+        private string _terminalId = "";
+        private decimal _maxValue = 0.0M;
         private static object _lockObject=new object();
         private static Dictionary<int, string> _errorsDescription=new Dictionary<int,string>();
         private int _operationID;
@@ -105,6 +107,11 @@ namespace PersonalizeBalanceCard
             textLoger.Text += String.Format("{0}; EventEntryType {1}\r\n", text, ev);
         }
 
+        public void Logger2(String text)
+        {
+            textLoger.Text += String.Format("{0};\r\n", text);
+        }
+
         public DisppenserStatus SendAction(CardOperationType cardOperationType)
         {
             DisppenserStatus result = DisppenserStatus.DispenserError;
@@ -129,7 +136,7 @@ namespace PersonalizeBalanceCard
                 {
                     client.SendPipeMessage(CardOperationType.reqControl_reader_1, "<?xml version='1.0' encoding='Windows-1251'?>\r\n<TCLib version='3.04'>\r\n\t<service>\r\n\t\t<reqControl>\r\n\t\t\t<reader>1</reader>\r\n\t\t</reqControl>\r\n\t</service>\r\n</TCLib>", PipeClient.CONNECT_TIMEOUT, true);
                     //base.CallBack("SetInfoWithMainMenu", this._waitCardMessage);
-                    //this.StartPooling(cardOperationType);
+                    this.StartPooling(cardOperationType);
                     Logger("Ждем", EventEntryType.Event);
                 }
             }
@@ -169,7 +176,6 @@ namespace PersonalizeBalanceCard
         private void PoolFunction(object state, ref DisppenserStatus statusOfDispenser)
         {
             object obj2;
-            string _terminalId = "";
             Thread.CurrentThread.CurrentCulture = CultureInfo.InvariantCulture;
             this._cancel = true;
             Monitor.Enter(obj2 = _lockObject);
@@ -226,7 +232,7 @@ namespace PersonalizeBalanceCard
                         return;
 
                     case "add":
-                        //this.Add(result, this._terminalId);
+                        this.Add(result, this._terminalId);
                         return;
 
                     case "cancel":
@@ -282,6 +288,180 @@ namespace PersonalizeBalanceCard
             }
         }
 
+        private void WorkFunction(object poolingType)
+        {
+            lock (_lockObject)
+            {
+                AnsStatus status;
+                decimal maxBalance;
+                string str;
+                object[] objArray;
+                decimal num3;
+                int num = 0;
+                this._cancel = false;
+                do
+                {
+                    try
+                    {
+                        str = new PipeClient().SendPipeMessage(CardOperationType.reqStatus, "<?xml version='1.0' encoding='windows-1251'?>\r\n<TCLib version='3.04'>\r\n\t<info>\r\n\t\t<reqStatus/>\r\n\t</info>\r\n</TCLib>", 0x1388, false);
+                        status = (AnsStatus)this.ExtractMessage(str, typeof(AnsStatus));
+                        maxBalance = status.info.MrkStatus.MaxBalance;
+                        //base.CallBack("LiveSignal", "");
+                    }
+                    catch (Exception exception1)
+                    {
+                        Exception exception = exception1;
+                        Logger("ERROR! Pooling exception: " + exception.Message, EventEntryType.Error);
+                        goto Label_05A4;
+                    }
+                    Thread.Sleep(0x3e8);
+                    if (++num > 20)
+                    {
+                        Logger("20 секунд прошло, а карту так и не приложили для чтения. Высылаем МРК команду \"Cancel\"", EventEntryType.Event);
+                        this.SendCancelCommand(true);
+                        goto Label_05A4;
+                    }
+                }
+                while (!status.info.MrkStatus.CardPresent);
+                CardOperationType type = (CardOperationType)poolingType;
+                string arg = (type == CardOperationType.Info) ? "Пожалуйста, подождите. Получаем выписку по карте..." : "this._readCardMessage";
+                //base.CallBack("SetStartPooling", arg);
+                //base.CallBack("LiveSignal", "");
+                cardInfo cardInfo = null;
+                string str3 = string.Empty;
+                string str4 = string.Empty;
+                try
+                {
+                    AnsWait wait;
+                    PipeClient client = new PipeClient();
+                    client.Logger = Logger;
+                    if (type == CardOperationType.Info)
+                    {
+                        str = client.SendPipeMessage(CardOperationType.Info, string.Format("<?xml version='1.0' encoding='Windows-1251'?>\r\n<TCLib version='3.04'>\r\n\t<card>\r\n\t\t<reqWaitCard>\r\n\t\t\t<timeout>{0}</timeout>\r\n\t\t\t<application>1</application>\r\n\t\t\t<getInfo>2</getInfo>\r\n\t\t</reqWaitCard>\r\n\t</card>\r\n</TCLib>", "30"), 0x30d40, true);
+                        wait = (AnsWait)this.ExtractMessage(str, typeof(AnsWait));
+                        str4 = "this.CreateInfo(wait)";
+                        //this.SetAccountInfo(wait.card.AnsWaitCard.CardInfo);
+                    }
+                    else
+                    {
+                        str = client.SendPipeMessage(CardOperationType.reqWaitCard, string.Format("<?xml version='1.0' encoding='Windows-1251'?>\r\n<TCLib version='3.04'>\r\n\t<card>\r\n\t\t<reqWaitCard>\r\n\t\t\t<timeout>{0}</timeout>\r\n\t\t\t<application>1</application>\r\n\t\t\t<getInfo>1</getInfo>\r\n\t\t</reqWaitCard>\r\n\t</card>\r\n</TCLib>", "30"), 0x9c40, true);
+                        wait = (AnsWait)this.ExtractMessage(str, typeof(AnsWait));
+                        cardInfo = wait.card.AnsWaitCard.CardInfo;
+                        string[] strArray = cardInfo.Description.Split(new char[] { ',' });
+                        string str5 = (strArray.Length > 1) ? (", " + strArray[1]) : string.Empty;
+                        this._maxValue = (maxBalance - cardInfo.Balance) / 100M;
+                        objArray = new object[4];
+                        objArray[0] = Environment.NewLine;
+                        num3 = cardInfo.Balance / 100M;
+                        objArray[1] = num3.ToString("F").Replace(",", ".") + " руб." + str5;
+                        objArray[2] = cardInfo.Pan;
+                        objArray[3] = this.CreateDate(cardInfo.Date);
+                        str3 = string.Format("Текущий баланс: {1}{0}Номер карты: {2}{0}Срок действия: {3}{0}", objArray) + ((this._maxValue > 0M) ? string.Format("Максимальная сумма пополнения: {0} руб.", this._maxValue) : "Карта пополнена на максимальную сумму");
+                    }
+                }
+                catch (MrkErrorException exception2)
+                {
+                    string message = string.Format("Ошибка ожидания карты: {0}", exception2.Error.Description);
+                    Logger(message, EventEntryType.Error);
+                    if (exception2.Error.Code == 0x68)
+                    {
+                        this.SendCancelCommand(true);
+                    }
+                    else
+                    {
+                        //base.CallBack("SetCrashScreen", message);
+                        Logger(string.Format("{0}: {1}", "SetCrashScreen", message), EventEntryType.Error);
+                    }
+                    goto Label_05A4;
+                }
+                catch (Exception exception4)
+                {
+                    //this.SetErrorScreen("Unexpected. Ошибка ожидания карты: " + exception4.ToString(), "Ошибка ожидания карты.", true);
+                    Logger("Unexpected. Ошибка ожидания карты: " + exception4.ToString() + " Ошибка ожидания карты.", EventEntryType.Error);
+                    goto Label_05A4;
+                }
+                switch (type)
+                {
+                    case CardOperationType.reqWriteCard:
+                        Logger("Пополнение. Дождались карту: " + Environment.NewLine + str3, EventEntryType.Event);
+                        //this.SetAccountInfo(cardInfo);
+                        //base.CallBack("SetWaitCardResult", str3);
+                        Logger(String.Format("{0}; {1}", "SetWaitCardResult", str3), EventEntryType.Event);
+                        if (this._maxValue > 0M)
+                        {
+                            //base.CallBack("SetButtonNext", "");
+                        }
+                        break;
+
+                    case CardOperationType.Balance:
+                        Logger("Просмотр баланса. Дождались карту: " + str3, EventEntryType.Event);
+                        //base.CallBack("SetBalanceResult", str3);
+                        break;
+
+                    case CardOperationType.reqChangePin:
+                        Logger("Смена пинкода. Дождались карту: " + str3, EventEntryType.Event);
+                        //base.CallBack("StartChangePin", string.Empty);
+                        break;
+
+                    case CardOperationType.reqPayment:
+                        objArray = new object[4];
+                        objArray[0] = Environment.NewLine;
+                        num3 = cardInfo.Balance / 100M;
+                        objArray[1] = num3.ToString("F").Replace(",", ".");
+                        objArray[2] = cardInfo.Pan;
+                        objArray[3] = this.CreateDate(cardInfo.Date);
+                        str3 = string.Format("Доступная для оплаты сумма: {1} руб.{0}Номер карты: {2}{0}Срок действия: {3}{0}", objArray);
+                        Logger("Оплата по карте. Дождались карту: " + str3, EventEntryType.Event);
+                        //base.CallBack("SetPan", cardInfo.Pan);
+                        //base.CallBack("SetWaitCardResult", str3);
+                        //base.CallBack("SetButtonNext", "");
+                        break;
+
+                    case CardOperationType.Info:
+                        //base.CallBack("SetDataGrid", str4);
+                        break;
+                }
+            Label_05A4: ;
+            }
+        }
+
+        private void Add(decimal money, string terminalId)
+        {
+            decimal num2 = money;
+            AnsWrite write;
+            decimal balance = 0M;
+            string str = decimal.ToInt32(num2 * 100M).ToString("d");
+            PipeClient client = new PipeClient();
+            client.Logger = Logger;
+            try
+            {
+                //base.CallBack("SetInfo", this._addWaitingMessage);
+                string str2 = client.SendPipeMessage(CardOperationType.reqWriteCard, string.Format("<?xml version='1.0' encoding='Windows-1251'?>\r\n<TCLib version='3.04'>\r\n\t<card>\r\n\t\t<reqWriteCard>\r\n\t\t\t<amount>{0}</amount>\r\n\t\t\t<terminalID>{1}</terminalID>\r\n\t\t\t<operation>{2}</operation>\r\n\t\t</reqWriteCard>\r\n\t</card>\r\n</TCLib>", str, terminalId, this.OperationID), 0x2ee0, true);
+                write = (AnsWrite)this.ExtractMessage(str2, typeof(AnsWrite));
+                //base.SetBalance(balance);
+                //base.AddTotal(-balance);
+            }
+            catch (MrkErrorException exception)
+            {
+                Logger("Ошибка пополнения карты: " + exception.Error.Description, EventEntryType.Error);
+                //this.BreakScenario("Ошибка пополнения карты: " + exception.Error.Description);
+                return;
+            }
+            catch (Exception exception2)
+            {
+                Logger("Неожиданная ошибка пополнения: " + exception2.ToString(), EventEntryType.Error);
+                //this.BreakScenario("Неожиданная ошибка пополнения: " + exception2.ToString());
+                return;
+            }
+            cardInfo cardInfo = write.card.CardInfo.CardInfo;
+            object[] args = new object[] { Environment.NewLine, (cardInfo.Balance / 100M).ToString("F"), cardInfo.Pan, this.CreateDate(cardInfo.Date) };
+            string message = string.Format("Карта успешно пополнена.{0} Текущий баланс: {1} руб.{0}Номер карты: {2}{0}Срок действия: {3}{0}", args);
+            //this.SetAccountInfo(cardInfo);
+            Logger(message, EventEntryType.Event);
+            //this.SendCancelCommand(false);
+            //base.CallBack("SetPrintStep", message);
+        }
+
         private void Sale(decimal money, string terminalId, bool oneStep = false)
         {
             AnsSale sale;
@@ -328,6 +508,49 @@ namespace PersonalizeBalanceCard
             //base.CallBack("SetPrintStep", "Не забудьте забрать карту!");
         }
 
+        private void SendCancelCommand(bool exit = true)
+        {
+            PipeClient client = new PipeClient();
+            client.Logger = Logger;
+            try
+            {
+                string message = client.SendPipeMessage(CardOperationType.reqCancelWaitCard, "<?xml version='1.0' encoding='Windows-1251'?>\r\n<TCLib version='3.04'>\r\n\t<card>\r\n\t\t<reqCancelWaitCard>\r\n\t\t\t<reader>0</reader>\r\n\t\t</reqCancelWaitCard>\r\n\t</card>\r\n</TCLib>", 0x1388, true);
+                AnsCancel cancel = (AnsCancel)this.ExtractMessage(message, typeof(AnsCancel));
+                if (cancel.card.AnsCancelCard == null)
+                {
+                    Logger("Ошибка отмены карты", EventEntryType.Error);
+                }
+                else
+                {
+                    Logger("Команда Cancel успешно выполнена.", EventEntryType.Event);
+                }
+            }
+            catch (WtfException exception)
+            {
+                Logger("Отмена. WTF: " + exception.Message, EventEntryType.Error);
+            }
+            catch (Exception exception2)
+            {
+                Logger("Ошибка отмены: " + exception2.ToString(), EventEntryType.Error);
+            }
+            finally
+            {
+                if (exit)
+                {
+                    //base.CallBack("Exit", string.Empty);
+                }
+            }
+        }
+
+        private void StartPooling(CardOperationType cardOperaionType)
+        {
+            //Thread _thread = new Thread(new ParameterizedThreadStart(this.WorkFunction));
+            //_thread.Start(cardOperaionType);
+            this.WorkFunction(cardOperaionType);
+        }
+
+
+
         private void button1_Click(object sender, EventArgs e)
         {
             Init();
@@ -345,6 +568,36 @@ namespace PersonalizeBalanceCard
                 PoolFunction((object)"sale;75;204", ref statusOfDispenser);
             } while (statusOfDispenser != DisppenserStatus.NoCard && statusOfDispenser != DisppenserStatus.DispenserError);
             textLoger.Text += String.Format("\r\nПоследний полученный статус: {0}", statusOfDispenser);
+        }
+
+        private void button2_Click(object sender, EventArgs e)
+        {
+            _errorsDescription.Clear();
+            textLoger.Clear();
+            Init();
+            
+            CRT530Library.ClassCRT530 dispenser = new CRT530Library.ClassCRT530();
+            dispenser.logging = Logger2;
+            dispenser.ComPort = "COM1";
+            dispenser.BaudRate = 5;
+
+            if (dispenser.OpenPort("COM1", 5))
+            {
+                for (int i = 0; i < 80; i++)
+                {
+                    dispenser.PreDispenseCard(CRT530Library.TypeDispense.LeaveSensor2);
+                    Thread.Sleep(2000);
+                    DisppenserStatus statusOfDispenser = DisppenserStatus.NoCard;
+                    PoolFunction((object)"start_add", ref statusOfDispenser);
+                    //Thread.Sleep(5000);
+                    PoolFunction((object)"add;25;204", ref statusOfDispenser);
+                    Thread.Sleep(1000);
+                    dispenser.PreDispenseCard(CRT530Library.TypeDispense.OutDoor);
+                    Thread.Sleep(2000);
+                }
+            }
+            dispenser.ClosePort();
+            MessageBox.Show("Готово");
         }
 
     }

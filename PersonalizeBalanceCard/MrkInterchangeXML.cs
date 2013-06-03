@@ -84,10 +84,40 @@ namespace PersonalizeBalanceCard
     }
 
     [XmlRoot("TCLib")]
+    public class AnsCancel
+    {
+        [XmlElement("card")]
+        public CancelCard card;
+    }
+
+    [XmlRoot("TCLib")]
+    public class AnsWait
+    {
+        [XmlElement("card")]
+        public WaitCard card;
+    }
+
+    [XmlRoot("TCLib")]
     public class AnsError
     {
         [XmlElement("error")]
         public TCerror error;
+    }
+
+    public class CancelCard
+    {
+        [XmlElement("ansCancelWaitCard")]
+        public ansCancelCard AnsCancelCard;
+    }
+
+    public class ansCancelCard
+    {
+    }
+
+    public class WaitCard
+    {
+        [XmlElement("ansWaitCard")]
+        public ansInfo AnsWaitCard;
     }
 
     public class ansInfo
@@ -98,6 +128,19 @@ namespace PersonalizeBalanceCard
         public cardInfo CardInfo;
         [XmlElement("print")]
         public print Print = new print();
+    }
+
+    [XmlRoot("TCLib")]
+    public class AnsWrite
+    {
+        [XmlElement("card")]
+        public ansWriteCard card;
+    }
+
+    public class ansWriteCard
+    {
+        [XmlElement("ansWriteCard")]
+        public ansInfo CardInfo;
     }
 
     public class TCerror
